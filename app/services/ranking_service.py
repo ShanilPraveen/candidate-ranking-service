@@ -25,7 +25,7 @@ class RankingService:
         
         # TODO: Add your model prediction here
         # For now, we'll just use the cosine similarity as the ranking score
-        ranking_score = features['cosine_similarity_skills']
+        ranking_score = features['highest_degree']
         
         # Update the record in the database
         await db.match_data.update_one(
