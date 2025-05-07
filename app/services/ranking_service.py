@@ -1,6 +1,14 @@
 from typing import Dict, Any
+import pandas as pd
+import joblib
+from pathlib import Path
+
 from app.database import get_database
 from app.services.feature_transformation_service import FeatureTransformationService
+
+# Load the model once when the module is loaded
+MODEL_PATH = Path("decision_tree_model.joblib")
+final_model = joblib.load(MODEL_PATH)
 
 class RankingService:
     @staticmethod
@@ -23,9 +31,12 @@ class RankingService:
         # Transform record to features
         features = FeatureTransformationService.transform_record_to_features(record)
         
-        # TODO: Add your model prediction here
-        # For now, we'll just use the cosine similarity as the ranking score
-        ranking_score = features['cosine_similarity_skills']
+        # Convert feature dict to a single-row DataFrame
+        features_df = pd.DataFrame([features])
+
+        # Predict ranking score using the trained model
+        ranking_score = final_model.predict(features_df)[0]
+        print("Predicted ranking score:", ranking_score)
         
         # Update the record in the database
         await db.match_data.update_one(
