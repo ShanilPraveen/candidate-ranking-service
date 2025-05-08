@@ -1,7 +1,7 @@
-from typing import List, Dict, Any
-import re
+from typing import List, Dict, Any, Union
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import re
 
 class FeatureTransformationService:
     # Education degree mapping dictionaries
@@ -117,6 +117,115 @@ class FeatureTransformationService:
         return best_match[1]
 
     @staticmethod
+    def normalize_education_text(text: str) -> str:
+        replacements = {
+            r'\bb[\s\.-]*sc\b': 'bachelor of science',
+            r'\bm[\s\.-]*sc\b': 'master of science',
+            r'\bb[\s\.-]*tech\b': 'bachelor of technology',
+            r'\bm[\s\.-]*tech\b': 'master of technology',
+            r'\bb[\s\.-]*e\b': 'bachelor of engineering',
+            r'\bm[\s\.-]*e\b': 'master of engineering',
+            r'\bb[\s\.-]*a\b': 'bachelor of arts',
+            r'\bm[\s\.-]*a\b': 'master of arts',
+            r'\bb[\s\.-]*com\b': 'bachelor of commerce',
+            r'\bm[\s\.-]*com\b': 'master of commerce',
+            r'\bb[\s\.-]*ba\b': 'bachelor of business administration',
+            r'\bm[\s\.-]*ba\b': 'master of business administration',
+            r'\bmba\b': 'master of business administration',
+            r'\bbba\b': 'bachelor of business administration',
+            r'\bph[\s\.-]*d\b': 'doctor of philosophy',
+            r'\bd[\s\.-]*phil\b': 'doctor of philosophy',
+            r'\bbachelor/honors\b': 'bachelor degree',
+            r'\bdiploma\b': 'diploma',
+            r'\bmasters?\b': 'master degree',
+        }
+
+        text = text.lower()
+        for pattern, replacement in replacements.items():
+            text = re.sub(pattern, replacement, text)
+        return text
+    
+    EDUCATION_RANKS = {
+    "others": 0,
+    "high school": 1,
+    "certificate": 1,
+    "ol": 1,
+    "al": 2,
+    "diploma": 3,
+    "associate": 3,
+    "nvq": 3,
+    "hnd": 3,
+    "aa": 3,
+    "aas": 3,
+    "as": 3,
+    "slim": 3,
+    "nibt": 3,
+    "bachelor of science": 4,
+    "bachelor of arts": 4,
+    "bachelor of engineering": 4,
+    "bachelor of technology": 4,
+    "bachelor of commerce": 4,
+    "bachelor of business administration": 4,
+    "bachelor degree": 4,
+    "bit": 4,
+    "bca": 4,
+    "bcom": 4,
+    "cima": 4,
+    "acca": 4,
+    "master of science": 5,
+    "master of arts": 5,
+    "master of engineering": 5,
+    "master of technology": 5,
+    "master of commerce": 5,
+    "master of business administration": 5,
+    "master degree": 5,
+    "mca": 5,
+    "ca": 5,
+    "doctor of philosophy": 6,
+    "phd": 6,
+    "doctorate": 6,
+    "philosophy doctor": 6,}
+
+    @staticmethod
+    def encode_required_education(text: Union[str, List[str]]) -> int:
+        if isinstance(text, list):
+            text = " ".join(text)
+
+        text = FeatureTransformationService.normalize_education_text(text)
+
+        best_rank = 0
+        for key, rank in FeatureTransformationService.EDUCATION_RANKS.items():
+            if key in text:
+                best_rank = max(best_rank, rank)
+        return best_rank
+
+
+
+    @staticmethod
+    def compute_education_similarity(candidate_degree: List[str], candidate_major: List[str], required_degree: List[str], required_major: List[str]) -> float:
+        # Join fields into strings
+        candidate_text = " ".join(candidate_degree + candidate_major)
+        required_text = " ".join(required_degree + required_major)
+
+        # Normalize and lowercase
+        candidate_text = FeatureTransformationService.normalize_education_text(candidate_text)
+        required_text = FeatureTransformationService.normalize_education_text(required_text)
+
+        # Handle empty inputs safely
+        if not candidate_text.strip() or not required_text.strip():
+            return 0.0
+
+        # Compute TF-IDF vectors
+        vectorizer = TfidfVectorizer()
+        vectors = vectorizer.fit_transform([candidate_text, required_text])
+
+        # Compute cosine similarity
+        similarity_matrix = cosine_similarity(vectors[0:1], vectors[1:2])
+        return similarity_matrix[0][0]
+        
+
+
+    @staticmethod
     def clean_skills(skills: List[str]) -> List[str]:
         """
         Clean and normalize a list of skills
@@ -176,10 +285,45 @@ class FeatureTransformationService:
         features = {}
         
         # Transform skills into cosine similarity feature
+        features['education_similarity'] = FeatureTransformationService.compute_education_similarity(
+            record.get('higest_degree_name',[]),
+            record.get('major_field_of_study',[]),
+            record.get('required_education_degree_name',[]),
+            record.get('required_education_major_field_of_study',[])
+        )
+
+        print("Education similarity:", features['education_similarity'])
+
+        features['experience_years'] = record.get('experience', 0)
+
+        print("Experience years:", features['experience_years'])
+
         features['cosine_similarity_skills'] = FeatureTransformationService.compute_skill_similarity(
             record.get('skills', []),
             record.get('required_skills', [])
         )
+
+        print("Cosine similarity skills:", features['cosine_similarity_skills'])
+
+        features['highest_degree'] = FeatureTransformationService.encode_required_education(
+            record.get('higest_degree_name', []),
+
+        )
+
+        print("Highest degree:", features['highest_degree'])
+
+        features['ed_req_encoded'] = FeatureTransformationService.encode_required_education(
+            record.get('required_education_degree_name', []),
+
+        )
+
+        print("Education required encoded:", features['ed_req_encoded'])
+
+        features['exp_req_encoded'] = record.get('required_experience', 0)
+
+        print("Experience required encoded:", features['exp_req_encoded'])
+
+  
         
         # Add experience_years feature directly from experience field
         features['experience_years'] = record.get('experience', 0)
