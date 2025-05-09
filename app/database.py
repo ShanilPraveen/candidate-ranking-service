@@ -12,7 +12,7 @@ load_dotenv()
 # MONGODB_URL = os.getenv("MONGODB_URL")
 password = urllib.parse.quote_plus("sp@mongo2025")
 MONGODB_URL = f"mongodb+srv://shanil:{password}@cluster0.jjqpodf.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
-DATABASE_NAME = os.getenv("DATABASE_NAME")
+DATABASE_NAME = "AI-Candidate_Ranking"
 
 # Async client for async operations
 client = AsyncIOMotorClient(MONGODB_URL)
