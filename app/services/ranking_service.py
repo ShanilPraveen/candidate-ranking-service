@@ -2,13 +2,14 @@ from typing import Dict, Any
 import pandas as pd
 import joblib
 from pathlib import Path
+import os
 
 from app.database import get_database
 from app.services.feature_transformation_service import FeatureTransformationService
 from app.services import bias  # Import bias analysis and mitigation module
 
 # Load the model once when the module is loaded
-MODEL_PATH = Path("decision_tree_model.joblib")
+MODEL_PATH = Path("D:\semester 4\SE\project tasks\candidate-ranking-service\decision_tree_model.joblib")
 final_model = joblib.load(MODEL_PATH)
 
 # Threshold for triggering bias analysis after N candidate predictions per job
