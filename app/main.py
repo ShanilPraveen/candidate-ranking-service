@@ -12,6 +12,7 @@ import re
 import urllib.parse
 from contextlib import asynccontextmanager
 from bson import ObjectId
+from datetime import datetime
 
 # MongoDB connection settings
 MONGODB_URL = f"mongodb+srv://ashidudissanayake1:chP0CyGcYR89zDeg@cluster0.4dg71cd.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
@@ -162,6 +163,68 @@ def split_degree_field(text):
     
     # If no degree variant is matched, return None for degree and the original text as field
     return None, text.strip()
+
+
+
+def calculate_total_experience(work_experience: list) -> float:
+    total_months = 0
+
+    for exp in work_experience:
+        # 1. Handle duration field
+        duration = exp.get("duration", "")
+        if duration:
+            duration = duration.lower()
+            months = 0
+
+            # Extract years and months
+            year_match = re.search(r"(\d+)\s*year", duration)
+            month_match = re.search(r"(\d+)\s*month", duration)
+
+            if year_match:
+                months += int(year_match.group(1)) * 12
+            if month_match:
+                months += int(month_match.group(1))
+
+            total_months += months
+            continue
+
+        # 2. Handle dates field
+        dates = exp.get("dates", "")
+        if not dates:
+            continue
+
+        # Normalize dashes
+        dates = re.sub(r"[–—−]", "-", dates)
+
+        try:
+            start_str, end_str = [s.strip() for s in dates.split("-")]
+        except ValueError:
+            continue  # Invalid format
+
+        # Handle "Present"
+        if "present" in end_str.lower():
+            end_date = datetime.today() # Current date assumed
+        else:
+            try:
+                end_date = datetime.strptime(end_str, "%B %Y")  # Full month
+            except ValueError:
+                try:
+                    end_date = datetime.strptime(end_str, "%b %Y")  # Abbr month
+                except:
+                    continue
+
+        try:
+            start_date = datetime.strptime(start_str, "%B %Y")
+        except ValueError:
+            try:
+                start_date = datetime.strptime(start_str, "%b %Y")
+            except:
+                continue
+
+        months = (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month)
+        total_months += max(0, months)
+
+    return round(total_months / 12, 2)
 
 # Pydantic Models
 class CandidateFeatures(BaseModel):
@@ -485,11 +548,13 @@ class RankingService:
         
         # Split required education into degree and major field
         required_degree, required_major = split_degree_field(job_data["required_education"])
+
+        total_experience = calculate_total_experience(resume_data["work_experience"])
         
         pre_record = {
             "higest_degree_name": [highest_degree] if highest_degree else [],  # Highest degree found
             "major_field_of_study": [major] if major else [],  # Major field of highest degree
-            "experience": 0,  # Will calculate from work_experience dates
+            "experience": total_experience,  # Will calculate from work_experience dates
             "skills": resume_data["skills"]["technical_skills"],
             "required_education_degree_name": [required_degree] if required_degree else [],  # Required degree
             "required_education_major_field_of_study": [required_major] if required_major else [],  # Required major field
@@ -498,40 +563,40 @@ class RankingService:
         }
 
         # Calculate total experience in years from work_experience dates
-        total_experience = 0
-        for exp in resume_data["work_experience"]:
-            dates = exp["dates"].split("–")
-            if len(dates) == 2:
-                start_date = dates[0].strip()
-                end_date = dates[1].strip()
+        # total_experience = 0
+        # for exp in resume_data["work_experience"]:
+        #     dates = exp["dates"].split("–")
+        #     if len(dates) == 2:
+        #         start_date = dates[0].strip()
+        #         end_date = dates[1].strip()
                 
-                # Simple calculation assuming each month is 1/12 of a year
-                # This is a basic implementation - you might want to use a more sophisticated date parsing
-                if "Present" in end_date:
-                    end_date = "2025"  # Use current year as end date
+        #         # Simple calculation assuming each month is 1/12 of a year
+        #         # This is a basic implementation - you might want to use a more sophisticated date parsing
+        #         if "Present" in end_date:
+        #             end_date = "2025"  # Use current year as end date
                 
-                try:
-                    start_year = int(start_date.split()[-1])
-                    end_year = int(end_date.split()[-1])
-                    total_experience += (end_year - start_year)
-                except (ValueError, IndexError):
-                    continue
+        #         try:
+        #             start_year = int(start_date.split()[-1])
+        #             end_year = int(end_date.split()[-1])
+        #             total_experience += (end_year - start_year)
+        #         except (ValueError, IndexError):
+        #             continue
 
-        pre_record["experience"] = total_experience
         print("Pre Record:", pre_record)
+        record = pre_record
         
-        # features = FeatureTransformationService.transform_record_to_features(record)
-        # features_df = pd.DataFrame([features])
-        # ranking_score = final_model.predict(features_df)[0]
-        # print("Predicted ranking score:", ranking_score)
+        features = FeatureTransformationService.transform_record_to_features(record)
+        features_df = pd.DataFrame([features])
+        ranking_score = final_model.predict(features_df)[0]
+        print("Predicted ranking score:", ranking_score)
 
-        # await db.match_data.update_one(
-        #     {"resumeID": resumeID, "vacancyID": vacancyID},
-        #     {"$set": {"ranking_score": ranking_score}}
-        # )
+        await db.parsed_resumes.update_one(
+            {"_id": resume_obj_id},
+            {"$set": {"ranking_score": ranking_score}}
+        )
 
         # await db.bias_tracking.update_one(
-        #     {"vacancyID": vacancyID},
+        #     {"_id": resume_obj_id},
         #     {"$inc": {"count": 1}},
         #     upsert=True
         # )
@@ -554,7 +619,7 @@ class RankingService:
         #         {"$set": {"count": 0}}
         #     )
 
-        return 1.0
+        return ranking_score
 
 # Prediction Service
 class PredictionService:
