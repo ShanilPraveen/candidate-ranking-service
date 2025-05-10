@@ -30,6 +30,139 @@ BIAS_TRIGGER_THRESHOLD = 100
 BIAS_CHECK_SAMPLE_SIZE = 100
 BIAS_THRESHOLD = 0.15
 
+# Degree mapping and splitting functions
+DEGREE_MAP = {
+    "phd": ["doctor of philosophy", "ph.d", "ph.d.", "phd", "doctorate", "ph.d. in", "phd candidate"],
+    "mba": ["master of business administration", "mba executive", "executive mba", "mba", "masters of business administration"],
+    "msc": ["master of science", "m.sc", "m.s", "masters of science", "msc", "masters in science", "m.sc."],
+    "ma": ["master of arts", "m.a", "m.a.", "masters of arts"],
+    "mcom": ["master of commerce", "m.com", "mcom"],
+    "me": ["master of engineering", "m.e", "m.eng", "m.e.", "m.engg"],
+    "mtech": ["master of technology", "m.tech", "mtech", "mtech integrated"],
+    "bsc": ["bachelor of science", "b.sc", "b.s", "bsc", "b.sc.", "b.s.", "honours bachelor of science", "bachelors of science"],
+    "ba": ["bachelor of arts", "b.a", "ba", "b.a.", "bachelors of arts"],
+    "bcom": ["bachelor of commerce", "b.com", "bcom"],
+    "be": ["bachelor of engineering", "b.e", "b.e.", "b.eng", "b.engg", "bachelor of engineering (b.e"],
+    "btech": ["bachelor of technology", "b.tech", "b.tech.", "btech", "b.tech(computers)", "dual degree (b.tech + m.tech)", "integrated b.tech & m.tech"],
+    "bba": ["bachelor of business administration", "b.b.a", "bba", "bba - accounting", "bba - finance", "bachelor business administration"],
+    "bca": ["bachelor of computer applications", "b.c.a", "bca"],
+    "mca": ["master of computer applications", "m.c.a", "mca"],
+    "bs": ["bs", "b.s", "b.s.", "b.s in", "bachelor's degree in science", "bachelor's in science"],
+    "ms": ["ms", "m.s", "m.s.", "master in computer science", "masters of science in information technology"],
+    "aa": ["associate of arts", "a.a", "aa"],
+    "aas": ["associate of applied science", "a.a.s", "aas"],
+    "as": ["associate of science", "a.s", "as", "associate of science degree"],
+    "associate": ["associate's degree", "associate degree", "associates degree", "associates", "associate"],
+    "diploma": ["technical diploma", "associate diploma", "polytechnic diploma", "diploma", "general diploma", "pg diploma", "master's diploma"],
+    "high school": ["high school diploma", "ged", "grade 12", "xii", "x", "kcse"],
+    "certificate": ["certificate of completion", "graduate certificate", "business certification", "epa certification", "aws brazing certification", "skills", "course", "certification", "minor", "training", "coaching"],
+    "others": ["n/a", "select one", "attending", "testing computer software", "general courses"],
+    "al": ["advanced level", "a/l", "a.l", "gce a/l", "gce advanced level", "gce (a/l)", "gce(al)", "gce-a/l"],
+    "ol": ["ordinary level", "o/l", "o.l", "gce o/l", "gce ordinary level", "gce (o/l)", "gce(ol)", "gce-o/l"],
+    "nvq": ["nvq", "nvq level 3", "nvq level 4", "nvq level 5", "nvq level 6", "national vocational qualification", "nvq diploma"],
+    "hnd": ["hnd", "higher national diploma", "hnd in", "higher national diploma in"],
+    "cima": ["cima", "chartered institute of management accountants", "cima qualification"],
+    "acca": ["acca", "association of chartered certified accountants"],
+    "ca": ["chartered accountant", "institute of chartered accountants of sri lanka", "ica", "ca sri lanka"],
+    "slim": ["slim", "slim diploma", "sri lanka institute of marketing", "slim pgd"],
+    "nibt": ["nibt", "national institute of business & technology", "nibt diploma"],
+    "bit": ["bit", "bachelor of information technology", "bit degree", "bit (colombo university)"]
+}
+
+# Create a reverse mapping from degree representations to standardized abbreviations
+DEGREE_VARIANTS = {}
+for abbrev, variants in DEGREE_MAP.items():
+    for variant in variants:
+        DEGREE_VARIANTS[variant.lower()] = abbrev.upper()
+
+# Sort variants by length in descending order to match longer variants first
+SORTED_VARIANTS = sorted(DEGREE_VARIANTS.keys(), key=len, reverse=True)
+
+# List of connector words to remove from the beginning of the field
+CONNECTOR_WORDS = ['in', 'of', 'on', 'for', 'at', 'with', 'to', 'and']
+
+# List of degree qualifiers that should be part of the degree name
+DEGREE_QUALIFIERS = [
+    r'eng\(hons\)', r'eng\s*\(hons\)',  # Eng(Hons)
+    r'\(hons\)', r'\(honors\)',  # (Hons), (Honors)
+    r'with\s*honors', r'with\s*honours',  # with honors/honours
+    r'with\s*distinction',  # with distinction
+    r'first\s*class',  # first class
+    r'second\s*class',  # second class
+    r'upper\s*division',  # upper division
+    r'lower\s*division',  # lower division
+]
+
+def split_degree_field(text):
+    """
+    Splits a degree string into standardized degree abbreviation and field of study.
+
+    Parameters:
+        text (str): The input string containing degree information.
+
+    Returns:
+        tuple: (degree_abbreviation (str or None), field_of_study (str))
+    """
+    text_lower = text.lower()
+    degree_abbrev = None
+    field = text
+    
+    # First, try to find a degree match
+    for variant in SORTED_VARIANTS:
+        pattern = r'\b' + re.escape(variant) + r'\b'
+        match = re.search(pattern, text_lower)
+        if match:
+            degree_abbrev = DEGREE_VARIANTS[variant]
+            # Extract the field by removing the matched degree variant from the original text
+            field = re.sub(pattern, '', text, flags=re.IGNORECASE).strip(" ,:-")
+            break
+    
+    # If no standard degree found, check for G.C.E
+    if not degree_abbrev:
+        if "g.c.e" in text_lower or "gce" in text_lower:
+            if "a/l" in text_lower or "advanced level" in text_lower:
+                degree_abbrev = "AL"
+                # Remove all G.C.E related terms and clean the field
+                field = text.replace("G.C.E", "").replace("A/L", "").replace("Advanced Level", "").replace("GCE", "").strip(" ,:-")
+                # If field is empty or only contains G.C.E related terms, set it to empty
+                if not field or all(term in text_lower for term in ["g.c.e", "gce", "a/l", "advanced level"]):
+                    field = ""
+            elif "o/l" in text_lower or "ordinary level" in text_lower:
+                degree_abbrev = "OL"
+                # Remove all G.C.E related terms and clean the field
+                field = text.replace("G.C.E", "").replace("O/L", "").replace("Ordinary Level", "").replace("GCE", "").strip(" ,:-")
+                # If field is empty or only contains G.C.E related terms, set it to empty
+                if not field or all(term in text_lower for term in ["g.c.e", "gce", "o/l", "ordinary level"]):
+                    field = ""
+    
+    if degree_abbrev:
+        # Look for degree qualifiers after the degree abbreviation
+        qualifier_pattern = '|'.join(DEGREE_QUALIFIERS)
+        qualifier_match = re.search(qualifier_pattern, field.lower())
+        
+        if qualifier_match:
+            # Extract the qualifier and add it to the degree
+            qualifier = field[qualifier_match.start():qualifier_match.end()]
+            degree_abbrev = f"{degree_abbrev} {qualifier}"
+            # Remove the qualifier from the field
+            field = re.sub(qualifier_pattern, '', field, flags=re.IGNORECASE).strip(" ,:-")
+        
+        # Handle comma-separated fields
+        if ',' in field:
+            # Take everything after the first comma as the field
+            field = field.split(',', 1)[1].strip()
+        
+        # Remove leading connector words from the field
+        field_tokens = field.split()
+        while field_tokens and field_tokens[0].lower() in CONNECTOR_WORDS:
+            field_tokens.pop(0)
+        field = ' '.join(field_tokens)
+        
+        return degree_abbrev, field
+    
+    # If no degree variant is matched, return None for degree and the original text as field
+    return None, text.strip()
+
 # Pydantic Models
 class CandidateFeatures(BaseModel):
     education_similarity: float
@@ -311,7 +444,7 @@ class RankingService:
         if not resume_data:
             raise ValueError(f"No resume found for resumeID {resumeID}")
         
-        print("Resume Data:", resume_data)
+        # print("Resume Data:", resume_data)
         
         job_obj_id = ObjectId(resume_data.get("job_id"))
         job_data = await db.jobs.find_one({
@@ -320,7 +453,72 @@ class RankingService:
         if not job_data:
             raise ValueError(f"No job found for jobID {resume_data.get('job_id')}")
 
-        print("Job Data:", job_data)
+        # print("Job Data:", job_data)
+        
+        # Find the highest degree from all education entries
+        highest_degree = None
+        highest_degree_text = None
+        highest_rank = -1
+
+        for edu in resume_data["education"]:
+            degree, major = split_degree_field(edu["degree"])
+            if degree:
+                # Get the base degree without qualifiers for ranking
+                base_degree = degree.split()[0] if degree else None
+                if base_degree:
+                    # Find the rank of this degree in EDUCATION_RANKS
+                    for key, rank in FeatureTransformationService.EDUCATION_RANKS.items():
+                        if key.upper() == base_degree:
+                            if rank > highest_rank:
+                                highest_rank = rank
+                                highest_degree = degree  # Keep the full degree with qualifiers
+                                highest_degree_text = edu["degree"]
+                            break
+
+        # If no degree was found, use the first education entry
+        if highest_degree is None and resume_data["education"]:
+            highest_degree, major = split_degree_field(resume_data["education"][0]["degree"])
+            highest_degree_text = resume_data["education"][0]["degree"]
+        else:
+            # Get the major field from the highest degree text
+            _, major = split_degree_field(highest_degree_text)
+        
+        # Split required education into degree and major field
+        required_degree, required_major = split_degree_field(job_data["required_education"])
+        
+        pre_record = {
+            "higest_degree_name": [highest_degree] if highest_degree else [],  # Highest degree found
+            "major_field_of_study": [major] if major else [],  # Major field of highest degree
+            "experience": 0,  # Will calculate from work_experience dates
+            "skills": resume_data["skills"]["technical_skills"],
+            "required_education_degree_name": [required_degree] if required_degree else [],  # Required degree
+            "required_education_major_field_of_study": [required_major] if required_major else [],  # Required major field
+            "required_experience": job_data["required_experience"],
+            "required_skills": job_data["required_skills"]
+        }
+
+        # Calculate total experience in years from work_experience dates
+        total_experience = 0
+        for exp in resume_data["work_experience"]:
+            dates = exp["dates"].split("–")
+            if len(dates) == 2:
+                start_date = dates[0].strip()
+                end_date = dates[1].strip()
+                
+                # Simple calculation assuming each month is 1/12 of a year
+                # This is a basic implementation - you might want to use a more sophisticated date parsing
+                if "Present" in end_date:
+                    end_date = "2025"  # Use current year as end date
+                
+                try:
+                    start_year = int(start_date.split()[-1])
+                    end_year = int(end_date.split()[-1])
+                    total_experience += (end_year - start_year)
+                except (ValueError, IndexError):
+                    continue
+
+        pre_record["experience"] = total_experience
+        print("Pre Record:", pre_record)
         
         # features = FeatureTransformationService.transform_record_to_features(record)
         # features_df = pd.DataFrame([features])
