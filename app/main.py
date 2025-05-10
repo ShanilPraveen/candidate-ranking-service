@@ -11,11 +11,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 import re
 import urllib.parse
 from contextlib import asynccontextmanager
+from bson import ObjectId
 
 # MongoDB connection settings
-password = urllib.parse.quote_plus("sp@mongo2025")
-MONGODB_URL = f"mongodb+srv://shanil:{password}@cluster0.jjqpodf.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
-DATABASE_NAME = "AI-Candidate_Ranking"
+MONGODB_URL = f"mongodb+srv://ashidudissanayake1:chP0CyGcYR89zDeg@cluster0.4dg71cd.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+DATABASE_NAME = "resume_rover_db"
 
 # Async client for async operations
 client = AsyncIOMotorClient(MONGODB_URL)
@@ -41,7 +41,6 @@ class CandidateFeatures(BaseModel):
 
 class RankingRequest(BaseModel):
     resumeID: str
-    vacancyID: str
 
 class RankingResponse(BaseModel):
     ranking_score: float
@@ -302,51 +301,62 @@ def apply_reweighing(records: List[Dict], biased_groups: List[int]) -> List[Dict
 # Ranking Service
 class RankingService:
     @staticmethod
-    async def calculate_and_update_ranking(resumeID: str, vacancyID: str) -> float:
+    async def calculate_and_update_ranking(resumeID: str) -> float:
         db = await get_database()
-        
-        record = await db.match_data.find_one({
-            "resumeID": resumeID,
-            "vacancyID": vacancyID
+
+        resume_obj_id = ObjectId(resumeID)
+        resume_data = await db.parsed_resumes.find_one({
+            "_id": resume_obj_id
         })
-        if not record:
-            raise ValueError(f"No record found for resumeID {resumeID} and vacancyID {vacancyID}")
+        if not resume_data:
+            raise ValueError(f"No resume found for resumeID {resumeID}")
         
-        features = FeatureTransformationService.transform_record_to_features(record)
-        features_df = pd.DataFrame([features])
-        ranking_score = final_model.predict(features_df)[0]
-        print("Predicted ranking score:", ranking_score)
+        print("Resume Data:", resume_data)
+        
+        job_obj_id = ObjectId(resume_data.get("job_id"))
+        job_data = await db.jobs.find_one({
+            "_id": job_obj_id
+        })
+        if not job_data:
+            raise ValueError(f"No job found for jobID {resume_data.get('job_id')}")
 
-        await db.match_data.update_one(
-            {"resumeID": resumeID, "vacancyID": vacancyID},
-            {"$set": {"ranking_score": ranking_score}}
-        )
+        print("Job Data:", job_data)
+        
+        # features = FeatureTransformationService.transform_record_to_features(record)
+        # features_df = pd.DataFrame([features])
+        # ranking_score = final_model.predict(features_df)[0]
+        # print("Predicted ranking score:", ranking_score)
 
-        await db.bias_tracking.update_one(
-            {"vacancyID": vacancyID},
-            {"$inc": {"count": 1}},
-            upsert=True
-        )
+        # await db.match_data.update_one(
+        #     {"resumeID": resumeID, "vacancyID": vacancyID},
+        #     {"$set": {"ranking_score": ranking_score}}
+        # )
 
-        bias_counter_doc = await db.bias_tracking.find_one({"vacancyID": vacancyID})
-        if bias_counter_doc and bias_counter_doc.get("count", 0) >= BIAS_TRIGGER_THRESHOLD:
-            print(f"[INFO] Triggering bias check for vacancyID: {vacancyID}")
-            records = await db.match_data.find({"vacancyID": vacancyID}).to_list(length=None)
-            biased_groups = check_bias(records)
-            if biased_groups:
-                updated_records = apply_reweighing(records, biased_groups)
-                for record in updated_records:
-                    await db.match_data.update_one(
-                        {"_id": record["_id"]},
-                        {"$set": {"ranking_score": record["ranking_score"]}}
-                    )
+        # await db.bias_tracking.update_one(
+        #     {"vacancyID": vacancyID},
+        #     {"$inc": {"count": 1}},
+        #     upsert=True
+        # )
 
-            await db.bias_tracking.update_one(
-                {"vacancyID": vacancyID},
-                {"$set": {"count": 0}}
-            )
+        # bias_counter_doc = await db.bias_tracking.find_one({"vacancyID": vacancyID})
+        # if bias_counter_doc and bias_counter_doc.get("count", 0) >= BIAS_TRIGGER_THRESHOLD:
+        #     print(f"[INFO] Triggering bias check for vacancyID: {vacancyID}")
+        #     records = await db.match_data.find({"vacancyID": vacancyID}).to_list(length=None)
+        #     biased_groups = check_bias(records)
+        #     if biased_groups:
+        #         updated_records = apply_reweighing(records, biased_groups)
+        #         for record in updated_records:
+        #             await db.match_data.update_one(
+        #                 {"_id": record["_id"]},
+        #                 {"$set": {"ranking_score": record["ranking_score"]}}
+        #             )
 
-        return ranking_score
+        #     await db.bias_tracking.update_one(
+        #         {"vacancyID": vacancyID},
+        #         {"$set": {"count": 0}}
+        #     )
+
+        return 1.0
 
 # Prediction Service
 class PredictionService:
@@ -387,8 +397,7 @@ def predict(
 async def calculate_ranking(request: RankingRequest):
     try:
         ranking_score = await RankingService.calculate_and_update_ranking(
-            request.resumeID,
-            request.vacancyID
+            request.resumeID
         )
         return RankingResponse(ranking_score=ranking_score)
     except ValueError as e:
